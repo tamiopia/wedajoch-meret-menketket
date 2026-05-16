@@ -1,0 +1,77 @@
+{
+  "name": "earthquake-terminal-sound",
+  "displayName": "Earthquake Terminal Sound",
+  "description": "Plays a sound whenever a terminal command fails with a non-zero exit code.",
+  "version": "0.0.21",
+  "publisher": "tamiopia",
+  "icon": "assets/icon.jpg",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tamiopia/earthquake-terminal-sound"
+  },
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "terminal-error-sound.testSound",
+        "title": "Earthquake Terminal Sound: Test Sound"
+      },
+      {
+        "command": "terminal-error-sound.toggle",
+        "title": "Earthquake Terminal Sound: Toggle On/Off"
+      },
+      {
+        "command": "terminal-error-sound.installShellHook",
+        "title": "Earthquake Terminal Sound: Install to System Shell (Zsh)"
+      }
+    ],
+    "configuration": {
+      "title": "Earthquake Terminal Sound",
+      "properties": {
+        "terminal-error-sound.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch to enable or disable the error sound alerts in VS Code."
+        },
+        "terminal-error-sound.soundPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom sound file path. Must be an absolute path (e.g. /Users/me/sound.mp3). Leave blank to use the default Earthquake sound."
+        },
+        "terminal-error-sound.volume": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Adjust the playback volume (0.0 to 1.0). Note: This depends on system 'afplay' support."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.88.0",
+    "@types/node": "20.x",
+    "typescript": "^5.4.5",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.7.1",
+    "@typescript-eslint/parser": "^7.7.1"
+  }
+}
