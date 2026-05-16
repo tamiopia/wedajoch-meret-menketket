@@ -2,13 +2,13 @@
   "name": "earthquake-terminal-sound",
   "displayName": "Earthquake Terminal Sound",
   "description": "Plays a sound whenever a terminal command fails with a non-zero exit code.",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "publisher": "tamiopia",
   "icon": "assets/icon.jpg",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tamiopia/earthquake-terminal-sound"
+    "url": "https://github.com/tamiopia/wedajoch-meret-menketket"
   },
   "engines": {
     "vscode": "^1.88.0"
@@ -32,7 +32,7 @@
       },
       {
         "command": "terminal-error-sound.installShellHook",
-        "title": "Earthquake Terminal Sound: Install to System Shell (Zsh)"
+        "title": "Earthquake Terminal Sound: Install to System Shell (Zsh/PowerShell)"
       }
     ],
     "configuration": {
@@ -53,7 +53,7 @@
           "default": 1.0,
           "minimum": 0,
           "maximum": 1,
-          "description": "Adjust the playback volume (0.0 to 1.0). Note: This depends on system 'afplay' support."
+          "description": "Adjust the playback volume (0.0 to 1.0). Supported on macOS (afplay) and Windows (PowerShell)."
         }
       }
     }

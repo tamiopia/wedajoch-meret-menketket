@@ -40,8 +40,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Register Install Shell Hook command
     const installHookCommand = vscode.commands.registerCommand('terminal-error-sound.installShellHook', async () => {
         try {
+            const platform = os.platform();
             const homeDir = os.homedir();
-            const zshrcPath = path.join(homeDir, '.zshrc');
             const targetDir = path.join(homeDir, '.earthquake-terminal-sound');
             const targetSoundPath = path.join(targetDir, 'error.mp3');
             const sourceSoundPath = context.asAbsolutePath(path.join('assets', 'error.mp3'));
@@ -54,8 +54,9 @@ export function activate(context: vscode.ExtensionContext) {
             // 2. Copy the sound file
             fs.copyFileSync(sourceSoundPath, targetSoundPath);
 
-            // 3. Prepare the hook code
-            const hookCode = `
+            if (platform === 'darwin') {
+                const zshrcPath = path.join(homeDir, '.zshrc');
+                const hookCode = `
 # Earthquake Terminal Sound Hook
 earthquake_hook() {
     local last_status=$?
@@ -68,19 +69,60 @@ if ! [[ "$precmd_functions" == *earthquake_hook* ]]; then
     add-zsh-hook precmd earthquake_hook
 fi
 `;
-
-            // 4. Append to .zshrc if not already there
-            if (fs.existsSync(zshrcPath)) {
-                const content = fs.readFileSync(zshrcPath, 'utf8');
-                if (!content.includes('earthquake_hook')) {
-                    fs.appendFileSync(zshrcPath, hookCode);
-                    vscode.window.showInformationMessage('Successfully installed Earthquake Sound to your .zshrc! Please restart your terminal or run "source ~/.zshrc".');
+                if (fs.existsSync(zshrcPath)) {
+                    const content = fs.readFileSync(zshrcPath, 'utf8');
+                    if (!content.includes('earthquake_hook')) {
+                        fs.appendFileSync(zshrcPath, hookCode);
+                        vscode.window.showInformationMessage('Successfully installed Earthquake Sound to your .zshrc! Please restart your terminal.');
+                    } else {
+                        vscode.window.showInformationMessage('Earthquake Sound is already installed in your .zshrc.');
+                    }
                 } else {
-                    vscode.window.showInformationMessage('Earthquake Sound is already installed in your .zshrc.');
+                    fs.writeFileSync(zshrcPath, hookCode);
+                    vscode.window.showInformationMessage('Created .zshrc and installed Earthquake Sound! Please restart your terminal.');
+                }
+            } else if (platform === 'win32') {
+                // Windows PowerShell Support
+                const psProfileDir = path.join(homeDir, 'Documents', 'WindowsPowerShell');
+                const psProfilePath = path.join(psProfileDir, 'Microsoft.PowerShell_profile.ps1');
+                
+                const hookCode = `
+# Earthquake Terminal Sound Hook
+function Earthquake-Hook {
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 130) {
+        Add-Type -AssemblyName PresentationCore
+        $player = New-Object System.Windows.Media.MediaPlayer
+        $player.Open('${targetSoundPath}')
+        $player.Play()
+        Start-Sleep -s 2
+    }
+}
+if (!(Get-Command prompt | Select-Object -ExpandProperty Definition | Select-String "Earthquake-Hook")) {
+    $OldPrompt = $ExecutionContext.InvokeCommand.GetCommand('prompt', 'Function')
+    function prompt {
+        Earthquake-Hook
+        if ($OldPrompt) { &$OldPrompt } else { "PS $($ExecutionContext.SessionState.Path.CurrentLocation)> " }
+    }
+}
+`;
+                if (!fs.existsSync(psProfileDir)) {
+                    fs.mkdirSync(psProfileDir, { recursive: true });
+                }
+
+                if (fs.existsSync(psProfilePath)) {
+                    const content = fs.readFileSync(psProfilePath, 'utf8');
+                    if (!content.includes('Earthquake-Hook')) {
+                        fs.appendFileSync(psProfilePath, hookCode);
+                        vscode.window.showInformationMessage('Successfully installed Earthquake Sound to your PowerShell profile! Please restart your terminal.');
+                    } else {
+                        vscode.window.showInformationMessage('Earthquake Sound is already installed in your PowerShell profile.');
+                    }
+                } else {
+                    fs.writeFileSync(psProfilePath, hookCode);
+                    vscode.window.showInformationMessage('Created PowerShell profile and installed Earthquake Sound! Please restart your terminal.');
                 }
             } else {
-                fs.writeFileSync(zshrcPath, hookCode);
-                vscode.window.showInformationMessage('Created .zshrc and installed Earthquake Sound! Please restart your terminal.');
+                vscode.window.showWarningMessage(`Shell hook installation is not yet supported for ${platform}.`);
             }
         } catch (err: any) {
             vscode.window.showErrorMessage(`Failed to install shell hook: ${err.message}`);
@@ -99,9 +141,19 @@ function playSound(context: vscode.ExtensionContext) {
         soundPath = context.asAbsolutePath(path.join('assets', 'error.mp3'));
     }
     
-    // For macOS, we use afplay
     const volume = config.get<number>('volume', 1.0);
-    const command = `afplay -v ${volume} "${soundPath}"`;
+    const platform = os.platform();
+    let command = '';
+
+    if (platform === 'darwin') {
+        command = `afplay -v ${volume} "${soundPath}"`;
+    } else if (platform === 'win32') {
+        // PowerShell command for Windows
+        command = `powershell -c "Add-Type -AssemblyName PresentationCore; $m = New-Object System.Windows.Media.MediaPlayer; $m.Open('${soundPath}'); $m.Volume = ${volume}; $m.Play(); Start-Sleep -s 2"`;
+    } else {
+        // Linux support (using paplay or aplay)
+        command = `paplay "${soundPath}" || aplay "${soundPath}"`;
+    }
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
