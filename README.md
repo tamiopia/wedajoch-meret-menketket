@@ -41,6 +41,10 @@ The extension listens for the "end of execution" signal from your shell. if the 
 - This extension uses the native `afplay` utility.
 - Supports `.mp3`, `.wav`, `.aiff`, and `.m4a` files.
 
+## 🪟 Windows Requirements
+- Windows playback uses the built-in Windows Multimedia (`winmm.dll`) interface and supports `.mp3` and `.wav` files.
+- The system shell hook is installed in the Windows PowerShell profile.
+
 ## Release Notes
 
 ### 2.1.0

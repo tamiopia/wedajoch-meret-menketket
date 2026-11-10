@@ -88,30 +88,8 @@ fi
                 
                 const hookFunction = `function Earthquake-Hook {
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 130) {
-        Add-Type -AssemblyName PresentationCore
-        $player = New-Object System.Windows.Media.MediaPlayer
-        try {
-            $player.Open([System.Uri]::new('${targetSoundPath.replace(/'/g, "''")}'))
-            $player.Play()
-            $deadline = [DateTime]::UtcNow.AddSeconds(60)
-            while (-not $player.NaturalDuration.HasTimeSpan -and [DateTime]::UtcNow -lt $deadline) {
-                Start-Sleep -Milliseconds 50
-            }
-            if (-not $player.NaturalDuration.HasTimeSpan) {
-                throw 'Timed out waiting for the sound file to load.'
-            }
-            $duration = $player.NaturalDuration.TimeSpan
-            while ($player.Position -lt $duration -and [DateTime]::UtcNow -lt $deadline) {
-                Start-Sleep -Milliseconds 50
-            }
-            if ($player.Position -lt $duration) {
-                throw 'Timed out waiting for sound playback to finish.'
-            }
-        } catch {
-            Write-Warning "Earthquake sound playback failed: $_"
-        } finally {
-            $player.Close()
-        }
+        ${getWindowsMciHelper()}
+        Play-EarthquakeSound -Path '${targetSoundPath.replace(/'/g, "''")}' -Volume 1000
     }
 }`;
                 const hookCode = `
@@ -176,32 +154,7 @@ function playSound(context: vscode.ExtensionContext) {
         command = `afplay -v ${volume} "${soundPath}"`;
     } else if (platform === 'win32') {
         const escapedSoundPath = soundPath.replace(/'/g, "''");
-        const script = `
-$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName PresentationCore
-$player = New-Object System.Windows.Media.MediaPlayer
-try {
-    $player.Open([System.Uri]::new('${escapedSoundPath}'))
-    $player.Volume = ${volume}
-    $player.Play()
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    while (-not $player.NaturalDuration.HasTimeSpan -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 50
-    }
-    if (-not $player.NaturalDuration.HasTimeSpan) {
-        throw 'Timed out waiting for the sound file to load.'
-    }
-    $duration = $player.NaturalDuration.TimeSpan
-    while ($player.Position -lt $duration -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 50
-    }
-    if ($player.Position -lt $duration) {
-        throw 'Timed out waiting for sound playback to finish.'
-    }
-} finally {
-    $player.Close()
-}
-`;
+        const script = `$ErrorActionPreference = 'Stop'\n${getWindowsMciHelper()}\nPlay-EarthquakeSound -Path '${escapedSoundPath}' -Volume ${Math.round(volume * 1000)}`;
         const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
         command = `powershell.exe -NoProfile -NonInteractive -STA -EncodedCommand ${encodedScript}`;
     } else {
@@ -211,10 +164,51 @@ try {
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
-            console.error(`Error playing sound: ${error.message}`);
-            vscode.window.showErrorMessage(`Failed to play sound. Check if the sound path is correct: ${soundPath}`);
+            const details = stderr.trim() || error.message;
+            console.error(`Error playing sound: ${details}`);
+            vscode.window.showErrorMessage(`Failed to play sound: ${details}`);
         }
     });
+}
+
+function getWindowsMciHelper(): string {
+    return `
+if (-not ('EarthquakeMci' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class EarthquakeMci {
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+    public static extern int mciSendString(string command, StringBuilder result, int length, IntPtr callback);
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+    private static extern int mciGetErrorString(int errorCode, StringBuilder message, int length);
+    public static void Send(string command) {
+        int result = mciSendString(command, null, 0, IntPtr.Zero);
+        if (result != 0) {
+            StringBuilder message = new StringBuilder(256);
+            mciGetErrorString(result, message, message.Capacity);
+            throw new InvalidOperationException(message.ToString());
+        }
+    }
+}
+'@
+}
+function Play-EarthquakeSound {
+    param([string]$Path, [ValidateRange(0, 1000)][int]$Volume = 1000)
+    $opened = $false
+    try {
+        [EarthquakeMci]::Send(('open "' + $Path + '" alias earthquakeSound'))
+        $opened = $true
+        [EarthquakeMci]::Send("setaudio earthquakeSound volume to $Volume")
+        [EarthquakeMci]::Send('play earthquakeSound wait')
+    } finally {
+        if ($opened) {
+            [void][EarthquakeMci]::mciSendString('close earthquakeSound', $null, 0, [IntPtr]::Zero)
+        }
+    }
+}
+`;
 }
 
 export function deactivate() {}
