@@ -2,7 +2,7 @@
   "name": "earthquake-terminal-sound",
   "displayName": "Earthquake Terminal Sound",
   "description": "Plays a sound whenever a terminal command fails with a non-zero exit code.",
-  "version": "0.0.22",
+  "version": "0.0.24",
   "publisher": "tamiopia",
   "icon": "assets/icon.jpg",
   "license": "MIT",

@@ -43,8 +43,9 @@ export function activate(context: vscode.ExtensionContext) {
             const platform = os.platform();
             const homeDir = os.homedir();
             const targetDir = path.join(homeDir, '.earthquake-terminal-sound');
-            const targetSoundPath = path.join(targetDir, 'error.mp3');
-            const sourceSoundPath = context.asAbsolutePath(path.join('assets', 'error.mp3'));
+            const soundFileName = platform === 'win32' ? 'error.wav' : 'error.mp3';
+            const targetSoundPath = path.join(targetDir, soundFileName);
+            const sourceSoundPath = context.asAbsolutePath(path.join('assets', soundFileName));
 
             // 1. Create stable directory for the sound
             if (!fs.existsSync(targetDir)) {
@@ -88,8 +89,8 @@ fi
                 
                 const hookFunction = `function Earthquake-Hook {
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 130) {
-        ${getWindowsMciHelper()}
-        Play-EarthquakeSound -Path '${targetSoundPath.replace(/'/g, "''")}' -Volume 1000
+        ${getWindowsWaveHelper()}
+        [EarthquakeWavePlayer]::Play('${targetSoundPath.replace(/'/g, "''")}', 1000)
     }
 }`;
                 const hookCode = `
@@ -139,22 +140,26 @@ if (!(Get-Command prompt | Select-Object -ExpandProperty Definition | Select-Str
 
 function playSound(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('terminal-error-sound');
+    const platform = os.platform();
     let soundPath = config.get<string>('soundPath');
     
-    // If no path is set, use the bundled error.mp3
+    // Use WAV on Windows to avoid MP3 decoder inconsistencies in MCI.
     if (!soundPath) {
-        soundPath = context.asAbsolutePath(path.join('assets', 'error.mp3'));
+        const soundFileName = platform === 'win32' ? 'error.wav' : 'error.mp3';
+        soundPath = context.asAbsolutePath(path.join('assets', soundFileName));
     }
     
     const volume = config.get<number>('volume', 1.0);
-    const platform = os.platform();
     let command = '';
 
     if (platform === 'darwin') {
         command = `afplay -v ${volume} "${soundPath}"`;
     } else if (platform === 'win32') {
         const escapedSoundPath = soundPath.replace(/'/g, "''");
-        const script = `$ErrorActionPreference = 'Stop'\n${getWindowsMciHelper()}\nPlay-EarthquakeSound -Path '${escapedSoundPath}' -Volume ${Math.round(volume * 1000)}`;
+        const volumeThousandths = Math.round(volume * 1000);
+        const script = path.extname(soundPath).toLowerCase() === '.wav'
+            ? `$ErrorActionPreference = 'Stop'\n${getWindowsWaveHelper()}\n[EarthquakeWavePlayer]::Play('${escapedSoundPath}', ${volumeThousandths})`
+            : `$ErrorActionPreference = 'Stop'\n${getWindowsMciHelper()}\nPlay-EarthquakeSound -Path '${escapedSoundPath}' -Volume ${volumeThousandths}`;
         const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
         command = `powershell.exe -NoProfile -NonInteractive -STA -EncodedCommand ${encodedScript}`;
     } else {
@@ -198,7 +203,8 @@ function Play-EarthquakeSound {
     param([string]$Path, [ValidateRange(0, 1000)][int]$Volume = 1000)
     $opened = $false
     try {
-        [EarthquakeMci]::Send(('open "' + $Path + '" alias earthquakeSound'))
+        $deviceType = if ([IO.Path]::GetExtension($Path) -ieq '.wav') { 'waveaudio' } else { 'mpegvideo' }
+        [EarthquakeMci]::Send(('open "' + $Path + '" type ' + $deviceType + ' alias earthquakeSound'))
         $opened = $true
         [EarthquakeMci]::Send("setaudio earthquakeSound volume to $Volume")
         [EarthquakeMci]::Send('play earthquakeSound wait')
@@ -207,6 +213,68 @@ function Play-EarthquakeSound {
             [void][EarthquakeMci]::mciSendString('close earthquakeSound', $null, 0, [IntPtr]::Zero)
         }
     }
+}
+`;
+}
+
+function getWindowsWaveHelper(): string {
+    return `
+if (-not ('EarthquakeWavePlayer' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Media;
+
+public static class EarthquakeWavePlayer {
+    public static void Play(string path, int volume) {
+        byte[] data = File.ReadAllBytes(path);
+        int format = -1;
+        int bitsPerSample = 0;
+        int dataOffset = -1;
+        int dataLength = 0;
+
+        for (int offset = 12; offset + 8 <= data.Length;) {
+            int chunkLength = BitConverter.ToInt32(data, offset + 4);
+            int payloadOffset = offset + 8;
+            if (chunkLength < 0 || payloadOffset + chunkLength > data.Length) {
+                throw new InvalidDataException("Invalid WAV chunk size.");
+            }
+            string chunkId = System.Text.Encoding.ASCII.GetString(data, offset, 4);
+            if (chunkId == "fmt " && chunkLength >= 16) {
+                format = BitConverter.ToInt16(data, payloadOffset);
+                bitsPerSample = BitConverter.ToInt16(data, payloadOffset + 14);
+            } else if (chunkId == "data") {
+                dataOffset = payloadOffset;
+                dataLength = chunkLength;
+            }
+            offset = payloadOffset + chunkLength + (chunkLength & 1);
+        }
+
+        if (format != 1 || bitsPerSample != 16 || dataOffset < 0 || dataLength % 2 != 0) {
+            throw new InvalidDataException("Windows WAV playback requires 16-bit PCM audio.");
+        }
+        if (volume < 0 || volume > 1000) {
+            throw new ArgumentOutOfRangeException("volume");
+        }
+        if (volume != 1000) {
+            int end = dataOffset + dataLength;
+            for (int offset = dataOffset; offset < end; offset += 2) {
+                int sample = BitConverter.ToInt16(data, offset);
+                int scaled = (int)Math.Round(sample * volume / 1000.0);
+                scaled = Math.Max(short.MinValue, Math.Min(short.MaxValue, scaled));
+                data[offset] = (byte)(scaled & 0xff);
+                data[offset + 1] = (byte)((scaled >> 8) & 0xff);
+            }
+        }
+
+        using (MemoryStream stream = new MemoryStream(data, false))
+        using (SoundPlayer player = new SoundPlayer(stream)) {
+            player.Load();
+            player.PlaySync();
+        }
+    }
+}
+'@
 }
 `;
 }

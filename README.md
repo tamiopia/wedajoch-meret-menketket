@@ -42,7 +42,7 @@ The extension listens for the "end of execution" signal from your shell. if the 
 - Supports `.mp3`, `.wav`, `.aiff`, and `.m4a` files.
 
 ## 🪟 Windows Requirements
-- Windows playback uses the built-in Windows Multimedia (`winmm.dll`) interface and supports `.mp3` and `.wav` files.
+- Windows playback uses built-in Windows audio APIs and the bundled four-second WAV file by default. Custom WAV files must use 16-bit PCM; custom MP3 files are also supported.
 - The system shell hook is installed in the Windows PowerShell profile.
 
 ## Release Notes
