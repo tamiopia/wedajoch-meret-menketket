@@ -86,17 +86,37 @@ fi
                 const psProfileDir = path.join(homeDir, 'Documents', 'WindowsPowerShell');
                 const psProfilePath = path.join(psProfileDir, 'Microsoft.PowerShell_profile.ps1');
                 
-                const hookCode = `
-# Earthquake Terminal Sound Hook
-function Earthquake-Hook {
+                const hookFunction = `function Earthquake-Hook {
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 130) {
         Add-Type -AssemblyName PresentationCore
         $player = New-Object System.Windows.Media.MediaPlayer
-        $player.Open('${targetSoundPath}')
-        $player.Play()
-        Start-Sleep -s 2
+        try {
+            $player.Open([System.Uri]::new('${targetSoundPath.replace(/'/g, "''")}'))
+            $player.Play()
+            $deadline = [DateTime]::UtcNow.AddSeconds(60)
+            while (-not $player.NaturalDuration.HasTimeSpan -and [DateTime]::UtcNow -lt $deadline) {
+                Start-Sleep -Milliseconds 50
+            }
+            if (-not $player.NaturalDuration.HasTimeSpan) {
+                throw 'Timed out waiting for the sound file to load.'
+            }
+            $duration = $player.NaturalDuration.TimeSpan
+            while ($player.Position -lt $duration -and [DateTime]::UtcNow -lt $deadline) {
+                Start-Sleep -Milliseconds 50
+            }
+            if ($player.Position -lt $duration) {
+                throw 'Timed out waiting for sound playback to finish.'
+            }
+        } catch {
+            Write-Warning "Earthquake sound playback failed: $_"
+        } finally {
+            $player.Close()
+        }
     }
-}
+}`;
+                const hookCode = `
+# Earthquake Terminal Sound Hook
+${hookFunction}
 if (!(Get-Command prompt | Select-Object -ExpandProperty Definition | Select-String "Earthquake-Hook")) {
     $OldPrompt = $ExecutionContext.InvokeCommand.GetCommand('prompt', 'Function')
     function prompt {
@@ -111,11 +131,18 @@ if (!(Get-Command prompt | Select-Object -ExpandProperty Definition | Select-Str
 
                 if (fs.existsSync(psProfilePath)) {
                     const content = fs.readFileSync(psProfilePath, 'utf8');
-                    if (!content.includes('Earthquake-Hook')) {
+                    if (/^function Earthquake-Hook \{[\s\S]*?^\}/m.test(content)) {
+                        const updatedContent = content.replace(
+                            /^function Earthquake-Hook \{[\s\S]*?^\}/m,
+                            hookFunction
+                        );
+                        fs.writeFileSync(psProfilePath, updatedContent);
+                        vscode.window.showInformationMessage('Updated Earthquake Sound in your PowerShell profile! Please restart your terminal.');
+                    } else if (!content.includes('Earthquake-Hook')) {
                         fs.appendFileSync(psProfilePath, hookCode);
                         vscode.window.showInformationMessage('Successfully installed Earthquake Sound to your PowerShell profile! Please restart your terminal.');
                     } else {
-                        vscode.window.showInformationMessage('Earthquake Sound is already installed in your PowerShell profile.');
+                        vscode.window.showWarningMessage('Earthquake Sound was found in your PowerShell profile but could not be updated automatically. Please remove the old hook and install it again.');
                     }
                 } else {
                     fs.writeFileSync(psProfilePath, hookCode);
@@ -148,8 +175,35 @@ function playSound(context: vscode.ExtensionContext) {
     if (platform === 'darwin') {
         command = `afplay -v ${volume} "${soundPath}"`;
     } else if (platform === 'win32') {
-        // PowerShell command for Windows
-        command = `powershell -c "Add-Type -AssemblyName PresentationCore; $m = New-Object System.Windows.Media.MediaPlayer; $m.Open('${soundPath}'); $m.Volume = ${volume}; $m.Play(); Start-Sleep -s 2"`;
+        const escapedSoundPath = soundPath.replace(/'/g, "''");
+        const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName PresentationCore
+$player = New-Object System.Windows.Media.MediaPlayer
+try {
+    $player.Open([System.Uri]::new('${escapedSoundPath}'))
+    $player.Volume = ${volume}
+    $player.Play()
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    while (-not $player.NaturalDuration.HasTimeSpan -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not $player.NaturalDuration.HasTimeSpan) {
+        throw 'Timed out waiting for the sound file to load.'
+    }
+    $duration = $player.NaturalDuration.TimeSpan
+    while ($player.Position -lt $duration -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 50
+    }
+    if ($player.Position -lt $duration) {
+        throw 'Timed out waiting for sound playback to finish.'
+    }
+} finally {
+    $player.Close()
+}
+`;
+        const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+        command = `powershell.exe -NoProfile -NonInteractive -STA -EncodedCommand ${encodedScript}`;
     } else {
         // Linux support (using paplay or aplay)
         command = `paplay "${soundPath}" || aplay "${soundPath}"`;
